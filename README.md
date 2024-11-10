@@ -5,8 +5,8 @@ Este repositorio contiene varios scripts útiles escritos en PowerShell para tar
 ## Contenido
 
 - **`SystemCleaner.ps1`**: Script para limpiar archivos temporales y otros archivos innecesarios. 
-- **`VerClavesWifiGuardadas.ps1`**: Script para mostrar las claves WiFi guardadas en el sistema.
-- **`DiagnosticoPagina.ps1`**: Script para realizar un diagnóstico de una página web y verificar su disponibilidad y estado.
+- **`Verclaveswifi.ps1`**: Script para mostrar las claves WiFi guardadas en el sistema.
+- **`URL_diagnostic.ps1`**: Script para realizar un diagnóstico de una página web y verificar su disponibilidad y estado.
 
 ## Uso de los Scripts
 
