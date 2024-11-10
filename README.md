@@ -15,4 +15,4 @@ Este repositorio contiene varios scripts útiles escritos en PowerShell para tar
 2. Navega a la carpeta donde se encuentra el script.
 3. Ejecuta el siguiente comando:
    ```powershell
-   .\Nombre del script.ps1
+   .\Nombre_del_script.ps1
