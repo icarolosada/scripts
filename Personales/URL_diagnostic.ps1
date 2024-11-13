@@ -234,21 +234,22 @@ try {
 Write-Output "`n16. Verificación de Firewall:"
 
 # Definir el puerto a verificar (80 para HTTP, 443 para HTTPS)
-$port = 80
-$hostname = "example.com"  # Cambia esto por el hostname o IP que deseas verificar
+$puertos = @(80, 443)
+$hostname = ($pagina -replace "https?://", "").Split('/')[0]  # Extrae el nombre del host de la URL proporcionada
 
-# Intentar establecer una conexión a través del puerto
-try {
-    $tcpConnection = Test-NetConnection -ComputerName $hostname -Port $port -WarningAction SilentlyContinue
-
-    if ($tcpConnection.TcpTestSucceeded) {
-        Write-Output "La conexión al puerto $port en $hostname fue exitosa. No hay restricciones de firewall."
-    } else {
-        Write-Output "Error: No se pudo establecer una conexión al puerto $port en $hostname. Puede haber un firewall bloqueando el acceso."
+foreach ($puerto in $puertos) {
+    try {
+        $tcpConnection = Test-NetConnection -ComputerName $hostname -Port $puerto -WarningAction SilentlyContinue
+        if ($tcpConnection.TcpTestSucceeded) {
+            Write-Output "La conexión al puerto $puerto en $hostname fue exitosa. No hay restricciones de firewall."
+        } else {
+            Write-Output "Error: No se pudo establecer una conexión al puerto $puerto en $hostname. Puede haber un firewall bloqueando el acceso."
+        }
+    } catch {
+        Write-Output "Error: No se pudo verificar el firewall para $puerto en $hostname."
     }
-} catch {
-    Write-Output "Error: No se pudo verificar el firewall para $hostname."
 }
+
 
 
 
