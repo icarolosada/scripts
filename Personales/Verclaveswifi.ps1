@@ -1,30 +1,67 @@
-# Cambiar la pol韙ica de ejecuci髇 temporalmente (si no lo has configurado en el .bat)
+# Cambiar la pol铆tica de ejecuci贸n temporalmente
 $originalPolicy = Get-ExecutionPolicy
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
-try {
+function Get-WifiProfiles {
     # Obtiene los perfiles de WiFi guardados en el sistema
     $wifiProfiles = netsh wlan show profiles | Select-String "\:\s(.*)$" | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    return $wifiProfiles
+}
+
+function Get-WifiKey {
+    param (
+        [string]$profile
+    )
+    # Obtiene la informaci贸n de la clave del perfil
+    $wifiKeyOutput = netsh wlan show profile name="$profile" key=clear
+    $wifiKey = $wifiKeyOutput | Select-String "Key Content"
+    
+    if ($wifiKey) {
+        # Extrae y devuelve la clave de la red
+        return $wifiKey.ToString().Split(':')[1].Trim()
+    } else {
+        return $null
+    }
+}
+
+function Display-WifiInfo {
+    param (
+        [string[]]$wifiProfiles
+    )
 
     # Recorre cada perfil y obtiene la clave de seguridad (si existe)
     foreach ($profile in $wifiProfiles) {
-        # Muestra el nombre de la red WiFi
-        Write-Output "Red WiFi: $profile"
+        Write-Host "Red WiFi: $profile" -ForegroundColor Cyan
         
-        # Obtiene la informaci髇 de la clave del perfil
-        $wifiKeyOutput = netsh wlan show profile name="$profile" key=clear
-        $wifiKey = $wifiKeyOutput | Select-String "Key Content"  # "Key Content" en lugar de "Contenido de la clave"
-
-        # Muestra la clave si se encuentra, en color verde
-        if ($wifiKey) {
-            $key = $wifiKey.ToString().Split(':')[1].Trim()
-            Write-Output "Clave: $key`n"
+        # Obtiene la clave de la red WiFi
+        $key = Get-WifiKey -profile $profile
+        
+        # Muestra la clave si se encuentra
+        if ($key) {
+            Write-Host "Clave: $key" -ForegroundColor Green
         } else {
-            Write-Output "Clave: No disponible`n"
+            Write-Host "Clave: No disponible" -ForegroundColor Red
         }
+        Write-Host "`n"
     }
 }
+
+try {
+    # Obtiene los perfiles de WiFi
+    $wifiProfiles = Get-WifiProfiles
+    
+    if ($wifiProfiles.Count -eq 0) {
+        Write-Host "No se encontraron perfiles WiFi guardados." -ForegroundColor Yellow
+    } else {
+        # Muestra la informaci贸n de los perfiles WiFi
+        Display-WifiInfo -wifiProfiles $wifiProfiles
+    }
+}
+catch {
+    Write-Host "Ocurri贸 un error al obtener la informaci贸n de las redes WiFi." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+}
 finally {
-    # Restaurar la pol韙ica de ejecuci髇 original
+    # Restaurar la pol铆tica de ejecuci贸n original
     Set-ExecutionPolicy $originalPolicy -Scope Process -Force
 }
