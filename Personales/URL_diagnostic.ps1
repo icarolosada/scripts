@@ -21,7 +21,11 @@ try {
 Write-Output "`n2. Comprobación de Ping:"
 try {
     $ping = Test-Connection -ComputerName $hostname -Count 4 -ErrorAction Stop
-    Write-Output "Ping exitoso. Tiempo de respuesta promedio: $($ping | Measure-Object ResponseTime -Average | Select-Object -ExpandProperty Average) ms"
+    if ($ping.StatusCode -eq 0) {
+        Write-Output "Ping exitoso. Tiempo de respuesta promedio: $($ping | Measure-Object ResponseTime -Average | Select-Object -ExpandProperty Average) ms"
+    } else {
+        Write-Output "Ping fallido. Código de estado: $($ping.StatusCode)"
+    }
 } catch {
     Write-Output "Error: No se pudo hacer ping al sitio. Puede estar bloqueado o no responde a ICMP."
 }
@@ -76,45 +80,82 @@ try {
 }
 
 # 8. Verificación de los certificados SSL
-Write-Output "`n12. Verificación de los certificados SSL:"
+Write-Output "`n8. Verificación de los certificados SSL:"
 try {
     # Conectar al servidor utilizando HTTPS
+    $tcpClient = New-Object System.Net.Sockets.TcpClient($hostname, 443)
     $sslStream = New-Object System.Net.Security.SslStream(
-        [System.Net.Sockets.NetworkStream]::new((New-Object System.Net.Sockets.TcpClient($hostname, 443)).Client)
+        [System.Net.Sockets.NetworkStream]::new($tcpClient.Client)
     )
 
     # Iniciar la autenticación SSL
     $sslStream.AuthenticateAsClient($hostname)
-    
+
     # Obtener el certificado del servidor
-    $cert = $sslStream.RemoteCertificate
+    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($sslStream.RemoteCertificate)
     $sslStream.Close()
+    $tcpClient.Close()
 
-    # Mostrar la información del certificado
-    Write-Output "Certificado SSL: $($cert.Subject)"
-    Write-Output "Emisor: $($cert.Issuer)"
-    Write-Output "Válido desde: $($cert.GetEffectiveDateString())"
-    Write-Output "Válido hasta: $($cert.GetExpirationDateString())"
+    # Mostrar información básica del certificado
+    Write-Output "Certificado SSL:"
+    Write-Output "  - Asunto (Subject): $($cert.Subject)"
+    Write-Output "  - Emisor (Issuer): $($cert.Issuer)"
+    Write-Output "  - Algoritmo de firma: $($cert.SignatureAlgorithm.FriendlyName)"
+    Write-Output "  - Válido desde: $($cert.NotBefore)"
+    Write-Output "  - Válido hasta: $($cert.NotAfter)"
 
-    # Comprobar si el certificado está caducado
-    if ($cert.GetExpirationDateString() -lt (Get-Date)) {
-        Write-Output "El certificado ha caducado."
+    # Validación de la fecha de vencimiento
+    if ($cert.NotAfter -lt (Get-Date)) {
+        Write-Output "  - Estado: ❌ El certificado ha caducado."
+    } elseif ($cert.NotAfter -lt (Get-Date).AddDays(30)) {
+        Write-Output "  - Estado: ⚠️ El certificado caducará en los próximos 30 días."
     } else {
-        Write-Output "El certificado es válido."
+        Write-Output "  - Estado: ✅ El certificado es válido."
     }
-} catch {
-    Write-Output "Error: No se pudo verificar el certificado SSL o no se puede establecer una conexión segura."
+
+    # Verificar si el certificado es auto-firmado (issuer = subject)
+    if ($cert.Subject -eq $cert.Issuer) {
+        Write-Output "  - Advertencia: ⚠️ El certificado es auto-firmado. Esto puede ser inseguro."
+    }
+
+    # Verificación adicional de firma y propósito
+    if (-not $cert.Extensions) {
+        Write-Output "  - Advertencia: No se encontraron extensiones en el certificado."
+    } else {
+        foreach ($extension in $cert.Extensions) {
+            if ($extension.Oid.FriendlyName -eq "Enhanced Key Usage") {
+                Write-Output "  - Propósito del certificado: $($extension.Format($true))"
+            }
+        }
+    }
+}
+catch {
+    Write-Output "Error: No se pudo verificar el certificado SSL o no se puede establecer una conexión segura. Detalles: $_"
 }
 
+# 9. Prueba de DNS inverso (reverse DNS lookup)
+Write-Output "`n9. Prueba de DNS inverso:"
+try {
+    $ipAddress = [System.Net.Dns]::GetHostAddresses($hostname)[0].ToString()
+    $reverseDNS = [System.Net.Dns]::GetHostEntry($ipAddress).HostName
+    Write-Output "DNS inverso: $reverseDNS"
+} catch {
+    Write-Output "Error: No se pudo realizar la búsqueda DNS inversa."
+}
 
 # 10. Comprobación de los servidores de nombres (DNS servers)
 Write-Output "`n10. Comprobación de los servidores de nombres (DNS servers):"
 try {
-    $dnsServers = (Resolve-DnsName -Name $hostname).NameHost
-    Write-Output "Servidor de nombres DNS: $($dnsServers)"
+    $dnsServers = Resolve-DnsName -Name $hostname -Type A  # Tipo A para obtener las direcciones IPv4
+    if ($dnsServers) {
+        $dnsServers | ForEach-Object { Write-Output "Servidor DNS: $($_.NameHost)" }
+    } else {
+        Write-Output "No se encontraron servidores de nombres."
+    }
 } catch {
-    Write-Output "Error: No se pudo obtener el servidor de nombres DNS."
+    Write-Output "Error: No se pudo resolver el nombre de dominio. Detalles: $_"
 }
+
 
 # 11. Prueba de Proxy
 Write-Output "`n11. Prueba de Proxy:"
@@ -126,7 +167,7 @@ try {
     $response.Close()
 } catch {
     Write-Output "Error: No se pudo acceder al sitio a través de un proxy."
-}
+}	
 
 # 12. Verificación de cabeceras HTTP (headers)
 Write-Output "`n12. Verificación de cabeceras HTTP:"
@@ -153,14 +194,28 @@ try {
 # 14. Prueba de carga de contenido (latencia de carga)
 Write-Output "`n14. Prueba de carga de contenido:"
 try {
+    # Establecer tiempo de espera máximo para la solicitud
+    $timeout = 10  # Tiempo en segundos
     $startTime = Get-Date
-    $response = Invoke-WebRequest -Uri $pagina
+
+    # Realizar la solicitud HTTP con un tiempo de espera
+    $response = Invoke-WebRequest -Uri $pagina -TimeoutSec $timeout
+
     $endTime = Get-Date
-    $loadTime = ($endTime - $startTime).TotalMilliseconds
-    Write-Output "Tiempo de carga: $loadTime ms"
+    $loadTime = ($endTime - $startTime).TotalSeconds  # Convertir el tiempo a segundos
+    $contentSize = $response.Content.Length
+
+    Write-Output "Tiempo de carga: $([math]::Round($loadTime, 2)) segundos"  # Mostrar el tiempo con 2 decimales
+    Write-Output "Tamaño del contenido descargado: $([math]::Round($contentSize / 1MB, 2)) MB"  # Mostrar tamaño con 2 decimales
+
+} catch [System.Net.WebException] {
+    Write-Output "Error de WebException: No se pudo cargar el contenido del sitio. Detalles: $_"
+} catch [System.TimeoutException] {
+    Write-Output "Error: El tiempo de espera para cargar el contenido excedió el límite de $timeout segundos."
 } catch {
-    Write-Output "Error: No se pudo cargar el contenido del sitio."
+    Write-Output "Error: No se pudo cargar el contenido del sitio. Detalles: $_"
 }
+
 
 # 15. Verificación de redirección HTTP/HTTPS (redirección 301/302)
 Write-Output "`n15. Verificación de redirección HTTP/HTTPS:"
@@ -175,16 +230,26 @@ try {
     Write-Output "Error: No se pudo verificar la redirección."
 }
 
-# 16. Verificación de Firewall o restricciones regionales
-Write-Output "`n16. Verificación de Firewall o restricciones regionales:"
+# 16. Verificación de Firewall
+Write-Output "`n16. Verificación de Firewall:"
+
+# Definir el puerto a verificar (80 para HTTP, 443 para HTTPS)
+$port = 80
+$hostname = "example.com"  # Cambia esto por el hostname o IP que deseas verificar
+
+# Intentar establecer una conexión a través del puerto
 try {
-    # Aquí se pueden realizar pruebas para identificar bloqueos geográficos o de firewall,
-    # como revisar si la IP del sitio está bloqueada por un servicio externo.
-    Write-Output "Verificación de firewall o restricciones regionales realizada."
+    $tcpConnection = Test-NetConnection -ComputerName $hostname -Port $port -WarningAction SilentlyContinue
+
+    if ($tcpConnection.TcpTestSucceeded) {
+        Write-Output "La conexión al puerto $port en $hostname fue exitosa. No hay restricciones de firewall."
+    } else {
+        Write-Output "Error: No se pudo establecer una conexión al puerto $port en $hostname. Puede haber un firewall bloqueando el acceso."
+    }
 } catch {
-    Write-Output "Error: No se pudo verificar restricciones regionales o firewall."
+    Write-Output "Error: No se pudo verificar el firewall para $hostname."
 }
 
-Write-Output "`nTroubleshoot finalizado para: $pagina"
 
-Read-Host -Prompt "Presiona Enter para salir"
+
+Write-Output "`nTroubleshoot finalizado para: $pagina"
